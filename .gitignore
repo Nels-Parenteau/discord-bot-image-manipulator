@@ -1,0 +1,9 @@
+config.json
+
+#created with make filter
+jpegFilter
+
+#created with make init
+package-lock.json
+package.json
+node_modules/
