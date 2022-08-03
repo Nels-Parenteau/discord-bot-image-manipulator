@@ -1,3 +1,4 @@
+#standard input
 config.json
 
 #created with make filter
@@ -7,3 +8,7 @@ jpegFilter
 package-lock.json
 package.json
 node_modules/
+
+#input and output pictures
+input.photo
+outputJpeg.jpg

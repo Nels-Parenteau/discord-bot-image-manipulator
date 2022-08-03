@@ -44,7 +44,7 @@ client.on('messageCreate', async message => {
 
     if (command.startsWith("rot")) {
       await new Promise((resolve, reject) => {
-        let writer = fs.createWriteStream('input.jpg');
+        let writer = fs.createWriteStream('input.photo');
         let finish;
         try {finish = axios({
           method: 'get',
@@ -66,7 +66,7 @@ client.on('messageCreate', async message => {
       }) 
       
       try {
-        await jpegFilter("compress", "input.jpg");
+        await jpegFilter("compress", "input.photo");
         await message.reply({files: ["./outputJpeg.jpg"]});
       }
       catch (e) {
@@ -77,7 +77,7 @@ client.on('messageCreate', async message => {
 
     if (command.startsWith("border")) {
       await new Promise((resolve, reject) => {
-        let writer = fs.createWriteStream('input.jpg');
+        let writer = fs.createWriteStream('input.photo');
         let finish;
         try {finish = axios({
           method: 'get',
@@ -99,7 +99,7 @@ client.on('messageCreate', async message => {
       }) 
       
       try {
-        await jpegFilter("border", "input.jpg");
+        await jpegFilter("border", "input.photo");
         await message.reply({files: ["./outputJpeg.jpg"]});
       }
       catch (e) {
@@ -109,7 +109,7 @@ client.on('messageCreate', async message => {
 
     if (command.startsWith("sharpen")) {
       await new Promise((resolve, reject) => {
-        let writer = fs.createWriteStream('input.jpg');
+        let writer = fs.createWriteStream('input.photo');
         let finish;
         try {finish = axios({
           method: 'get',
@@ -131,7 +131,39 @@ client.on('messageCreate', async message => {
       }) 
 
       try {
-        await jpegFilter("sharpen", "input.jpg");
+        await jpegFilter("sharpen", "input.photo");
+        await message.reply({files: ["./outputJpeg.jpg"]});
+      }
+      catch (e) {
+        console.log(e);
+      }
+    }
+
+    if (command.startsWith("text")) {
+      await new Promise((resolve, reject) => {
+        let writer = fs.createWriteStream('input.photo');
+        let finish;
+        try {finish = axios({
+          method: 'get',
+          url: message.attachments.first().url,
+          responseType: 'stream'
+        }).then((response) => {
+          response.data.pipe(writer);
+          writer.on('error', (err) => {
+              reject(err);
+          });
+          writer.on('close', () => {
+              resolve();
+          });
+        }) }
+        catch (e) {
+          console.log(e);
+        }
+        return finish
+      }) 
+
+      try {
+        await jpegFilter("sharpen", "input.photo");
         await message.reply({files: ["./outputJpeg.jpg"]});
       }
       catch (e) {
