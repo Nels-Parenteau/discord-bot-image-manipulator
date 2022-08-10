@@ -5,29 +5,21 @@
 #include <jpeglib.h>
 #include <jerror.h>
 
+// Replacement struct & error_exit as specified in "example.c"
 struct my_error_mgr {
-  struct jpeg_error_mgr pub;	/* "public" fields */
+  struct jpeg_error_mgr pub;
 
-  jmp_buf setjmp_buffer;	/* for return to caller */
+  jmp_buf setjmp_buffer;
 };
 
 typedef struct my_error_mgr * my_error_ptr;
 
-/*
- * Here's the routine that will replace the standard error_exit method:
- */
-
 METHODDEF(void)
 my_error_exit (j_common_ptr cinfo)
 {
-  /* cinfo->err really points to a my_error_mgr struct, so coerce pointer */
   my_error_ptr myerr = (my_error_ptr) cinfo->err;
 
-  /* Always display the message. */
-  /* We could postpone this until after returning, if we chose. */
   (*cinfo->err->output_message) (cinfo);
-
-  /* Return control to the setjmp point */
   
   longjmp(myerr->setjmp_buffer, 1);
 }
@@ -35,8 +27,9 @@ my_error_exit (j_common_ptr cinfo)
 // Raw iamge struct, holds data about the RGB formating eg RGB888 or grayscale
 struct rawImage {
   unsigned int numComponents;
-  unsigned long int width, height;
-  unsigned char* data;
+  JDIMENSION width, height;
+  JSAMPROW data;
+  J_COLOR_SPACE colorSpace;
 };
 
 int getSubPixel(struct rawImage* rawImageData, int xCoord, int yCoord) {
@@ -51,49 +44,59 @@ void setSubPixel(struct rawImage* rawImageData, int xCoord,
   return;
 }
 
-//TO-DO way more error catching!
+// Reference libjpeg.doc for information about the ordering of the steps. We
+// will be using the numbering described from "Decompression details" section.
 struct rawImage* jpegToRaw(char* imgFile) {
+  // 1. Allocate and initialize a JPEG decompression object.
   struct jpeg_decompress_struct info;
   struct my_error_mgr err;
 
   struct rawImage* newImage;
-  
-  unsigned char* data;
-  JSAMPROW rowBuffer[1];
 
+  jpeg_create_decompress(&info);
+  info.err = jpeg_std_error(&err);
+
+  // 2. Specify the source of the compressed data (eg, a file).
   FILE* fp = fopen(imgFile, "rb");
   if(fp == NULL) {
     return NULL;
-  }
+  } 
+  jpeg_stdio_src(&info, fp);
 
-  info.err = jpeg_std_error(&err);
-
+  // "Hyjacking" the error_exit function pointer with out own that will not 
+  // exit().
   err.pub.error_exit = my_error_exit;
-  /* Establish the setjmp return context for my_error_exit to use. */
+
+  // Establish the setjmp return context for my_error_exit to use.
   if (setjmp(err.setjmp_buffer)) {
-    /* If we get here, the JPEG code has signaled an error.
-     * We need to clean up the JPEG object, close the input file, and return.
-     */
+    // If we get here, the JPEG code has signaled an error.
+    // We need to clean up the JPEG object, close the input file, and return.
     jpeg_destroy_decompress(&info);
     fclose(fp);
     return NULL;
   }
   
-  jpeg_create_decompress(&info);
-  jpeg_stdio_src(&info, fp);
+  // 3. Call jpeg_read_header() to obtain image info.
   jpeg_read_header(&info, TRUE);
+
+  // 5. jpeg_start_decompress(...);
   jpeg_start_decompress(&info);
 
-  data = malloc(info.output_width * info.output_height * 3);
+  unsigned char* data;
+  JSAMPROW rowBuffer[1];
+  data = malloc(info.output_width * info.output_height 
+                                  * info.num_components);
 
   newImage = malloc(sizeof(struct rawImage));
   newImage->numComponents = info.num_components;
   newImage->width = info.output_width;
   newImage->height = info.output_height;
+  newImage->colorSpace = info.out_color_space;
   newImage->data = data;
 
   while(info.output_scanline < info.output_height) {
-    rowBuffer[0] = &data[3 * info.output_width * info.output_scanline];
+    rowBuffer[0] = &data [newImage->numComponents 
+                       * info.output_width * info.output_scanline];
     jpeg_read_scanlines(&info, rowBuffer, 1);
   }
 
@@ -115,7 +118,7 @@ int rawToJpeg(struct rawImage* newImage, char* saveTo, int quality) {
   FILE* fp = fopen(saveTo, "wb");
 
   err.pub.error_exit = my_error_exit;
-  /* Establish the setjmp return context for my_error_exit to use. */
+  // Establish the setjmp return context for my_error_exit to use.
   if (setjmp(err.setjmp_buffer)) {
     /* If we get here, the JPEG code has signaled an error.
      * We need to clean up the JPEG object, close the input file, and return.
@@ -135,10 +138,10 @@ int rawToJpeg(struct rawImage* newImage, char* saveTo, int quality) {
   jpeg_stdio_dest(&info, fp);
 
   // 3. Set parameters for compression, including image size & colorspace.
+  info.in_color_space = newImage->colorSpace;
   info.image_width = newImage->width;
   info.image_height = newImage->height;
-  info.input_components = newImage->numComponents; 
-  info.in_color_space = JCS_RGB; //fix !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  info.input_components = newImage->numComponents;
 
   jpeg_set_defaults(&info);
   jpeg_set_quality(&info, quality, TRUE);
@@ -200,28 +203,33 @@ int jpegSharpen (char* inputJpeg, char* outputJpeg) {
   newImage->numComponents = rawImageData->numComponents;
   newImage->width = rawImageData->width;
   newImage->height = rawImageData->height;
+  newImage->colorSpace = rawImageData->colorSpace;
   newImage->data = data;
 
+  int comp = newImage->numComponents;
+
   for (int i = 0; i < rawImageData->height; i++) {
-    for (int j = 0; j < rawImageData->width * 3; j++) {
-      if (i < 3 || j < 3) {
+    for (int j = 0; j < rawImageData->width * comp; j++) {
+      if (i <= 0 || j <= 0) {
         setSubPixel(newImage, j, i, 0);
+        continue;
       }
-      if (i > rawImageData->height - 3 || j > rawImageData->width - 3) {
+      if (i >= rawImageData->height - 1 || j >= (rawImageData->width - 1) * comp) {
         setSubPixel(newImage, j, i, 0);
+        continue;
       }
-      int border = 9 * getSubPixel(rawImageData, j, i)
-                   - 2 * getSubPixel(rawImageData, j + 3, i)
-                   - 2 * getSubPixel(rawImageData, j, i + 3)
-                   - 2 * getSubPixel(rawImageData, j - 3, i)
-                   - 2 * getSubPixel(rawImageData, j, i - 3);
-      if (border > 255) {
-        border = 255;
+      int sharpen =   9 * getSubPixel(rawImageData, j    , i    )
+                   - 2 * getSubPixel(rawImageData, j, i    )
+                   - 2 * getSubPixel(rawImageData, j    , i)
+                   - 2 * getSubPixel(rawImageData, j, i    )
+                   - 2 * getSubPixel(rawImageData, j    , i);
+      if (sharpen > 255) {
+        sharpen = 255;
       }
-      if (border < 0) {
-        border = 0;
+      if (sharpen < 0) {
+        sharpen = 0;
       }
-      setSubPixel(newImage, j, i, border);
+      setSubPixel(newImage, j, i, sharpen);
     }
   }
 
@@ -255,27 +263,35 @@ int jpegBorder (char* inputJpeg, char* outputJpeg) {
   newImage->numComponents = rawImageData->numComponents;
   newImage->width = rawImageData->width;
   newImage->height = rawImageData->height;
+  newImage->colorSpace = rawImageData->colorSpace;
   newImage->data = data;
 
+  int comp = newImage->numComponents;
+
   for (int i = 0; i < rawImageData->height; i++) {
-    for (int j = 0; j < rawImageData->width * 3; j++) {
-      if (i < 3 || j < 3) {
+    for (int j = 0; j < rawImageData->width * comp; j++) {
+      if (i <= 0 || j <= 0) {
         setSubPixel(newImage, j, i, 0);
+        continue;
       }
-      if (i > rawImageData->height - 3 || j > rawImageData->width - 3) {
+      if (i >= rawImageData->height - 1 || j >= (rawImageData->width - 1) * comp) {
         setSubPixel(newImage, j, i, 0);
+        continue;
       }
-      int border = 16 * getSubPixel(rawImageData, j, i)
-                   - 4 * getSubPixel(rawImageData, j + 3, i)
-                   - 4 * getSubPixel(rawImageData, j, i + 3)
-                   - 4 * getSubPixel(rawImageData, j - 3, i)
-                   - 4 * getSubPixel(rawImageData, j, i - 3);
+
+      int border = 16  * getSubPixel(rawImageData, j    , i    )
+                   - 4 * getSubPixel(rawImageData, j + comp, i    )
+                   - 4 * getSubPixel(rawImageData, j    , i + 1)
+                   - 4 * getSubPixel(rawImageData, j - comp, i    )
+                   - 4 * getSubPixel(rawImageData, j    , i - 1);
+
       if (border > 255) {
         border = 255;
       }
       if (border < 0) {
         border = 0;
       }
+      
       setSubPixel(newImage, j, i, border);
     }
   }
