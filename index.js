@@ -1,5 +1,6 @@
-const { Client, Intents } = require('discord.js');
+const { Client, Intents, MessageEmbed } = require('discord.js');
 const { token } = require('./config.json');
+const { EmbedBuilder } = require('discord.js');
 
 const client = new Client({
     partials: ["MESSAGE", "REACTION"],
@@ -37,9 +38,15 @@ client.on('messageCreate', async message => {
     command = message.content.slice(1, message.content.length);
     const fs = require('fs');
     const axios = require('axios').default;
+
+    const embed = new MessageEmbed()
+      .setColor(0xAAAA00)
+      .setTitle("Welcome to Nels' Discord bot!")
+      .setURL('https://github.com/Nels-Parenteau/discord-bot-image-manipulator')
+      .setDescription("Please note that these commands only work with photos under the file format jpeg(.jpg). Get started by using a filter and an attatched image to the command! \n\n Commands are:\n\n - %help (This command)\n - %rot (This compresses)\n - %sharpen (This makes edges less blurry)\n - %border (Makes a bordered version of your image)\n - %text (Prints an ASCII version of your image)");
     
     if (command.startsWith("help")) {
-      await message.channel.send("```Welcome to Nels' Discord bot! Please note that these commands only work with photos under the file format jpeg(.jpg). Get started by using a filter and an attatched image to the command! \n Commands are:\n - %help (This command)\n - %rot (This compresses)\n - %sharpen (This makes edges less blurry)\n - %border (Makes a bordered version of your image)\n - %text (Prints an ASCII version of your image)```")
+      await message.channel.send({ embeds: [embed] });
     }
 
     if (command.startsWith("rot")) {
