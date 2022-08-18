@@ -12,3 +12,5 @@ node_modules/
 #input and output pictures
 input.photo
 outputJpeg.jpg
+output.png
+jpegToText.txt

@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <setjmp.h>
 #include <string.h>
+#include <png.h>
+#include <zlib.h>
 #include <jpeglib.h>
 #include <jerror.h>
 
@@ -14,14 +16,31 @@ struct my_error_mgr {
 
 typedef struct my_error_mgr * my_error_ptr;
 
-METHODDEF(void)
-my_error_exit (j_common_ptr cinfo)
+void my_error_exit (j_common_ptr cinfo)
 {
   my_error_ptr myerr = (my_error_ptr) cinfo->err;
 
   (*cinfo->err->output_message) (cinfo);
   
   longjmp(myerr->setjmp_buffer, 1);
+}
+
+// This comes directly from the example.c file from the libpng docs.
+int check_if_png(char *file_name) {
+  char buf[4];
+
+  FILE *fp = fopen(file_name, "rb");
+  if (fp == NULL) {
+    return 0;
+  }
+
+  // Read in some of the signature bytes.
+  if (fread(buf, 1, 4, fp) != 4) {
+    return 0;
+  }
+
+  // Compare the first PNG_BYTES_TO_CHECK bytes of the signature.
+  return(!png_sig_cmp(buf, 0, 4));
 }
 
 // Raw iamge struct, holds data about the RGB formating eg RGB888 or grayscale
@@ -32,16 +51,107 @@ struct rawImage {
   J_COLOR_SPACE colorSpace;
 };
 
+// This will return the subpixel
 int getSubPixel(struct rawImage* rawImageData, int xCoord, int yCoord) {
   return rawImageData->data[rawImageData->width * rawImageData->numComponents
                             * yCoord + xCoord];
 }
 
+// This will set the subpixel
 void setSubPixel(struct rawImage* rawImageData, int xCoord, 
                  int yCoord, unsigned char data) {
   rawImageData->data[rawImageData->width * rawImageData->numComponents * yCoord
                      + xCoord] = data;
   return;
+}
+
+// This function assumes that the input png is of exactly the format RGB888.
+// This is because png can be very complicated and it's output bytestream
+// can be very incompatible with jpeg.
+int toJpeg(){
+  png_image image;
+  memset(&image, 0, (sizeof image));
+  image.version = PNG_IMAGE_VERSION;
+
+  if (png_image_begin_read_from_file(&image, "output.png")) {
+      png_bytep buffer;
+
+      image.format = PNG_FORMAT_RGB;
+
+      buffer = malloc(PNG_IMAGE_SIZE(image));
+
+      if (buffer != NULL 
+          && png_image_finish_read(&image, NULL, buffer, 0, NULL)) {
+        // setting up the jpeg part
+        struct jpeg_compress_struct info;
+        struct jpeg_error_mgr err;
+
+        info.err = jpeg_std_error(&err);
+        FILE* fp = fopen("input.photo", "wb");
+
+        jpeg_create_compress(&info);
+        if(fp == NULL) {
+          return 1;
+        }
+
+        jpeg_stdio_dest(&info, fp);
+
+        // RGB888 format
+        info.in_color_space = JCS_RGB;
+        info.image_width = image.width;
+        info.image_height = image.height;
+        info.input_components = 3;
+
+        jpeg_set_defaults(&info);
+        jpeg_set_quality(&info, 90, TRUE);
+        jpeg_start_compress(&info, TRUE);
+
+        JSAMPROW row_pointer[1];
+
+        int row_stride = info.image_width * info.input_components;  
+
+        while(info.next_scanline < info.image_height) {
+          row_pointer[0] = &(buffer[info.next_scanline * row_stride]);
+          jpeg_write_scanlines(&info, row_pointer, 1);
+        }
+
+        jpeg_finish_compress(&info);
+        jpeg_destroy_compress(&info);
+        fclose(fp);
+        return 0;
+      }
+    }
+}
+
+// This comes directly from the example.c file from the libpng docs.
+int pngToJpeg(char* imgFile) {
+  png_image image;
+  memset(&image, 0, (sizeof image));
+  image.version = PNG_IMAGE_VERSION;
+
+  if (png_image_begin_read_from_file(&image, imgFile) != 0) {
+    png_bytep buffer;
+
+    image.format = PNG_FORMAT_RGB;
+    buffer = malloc(PNG_IMAGE_SIZE(image));
+
+    if (buffer != NULL 
+        && png_image_finish_read(&image, NULL, buffer, 0, NULL)) {
+
+      if (png_image_write_to_file(&image, "output.png", 0, buffer, 0, NULL)) {
+        return toJpeg();
+      }
+    }
+    else {
+      if (buffer == NULL) {
+        png_image_free(&image);
+      }
+      else {
+        free(buffer);
+      }
+    }
+  }
+  return 1;
 }
 
 // Reference libjpeg.doc for information about the ordering of the steps. We
@@ -120,9 +230,6 @@ int rawToJpeg(struct rawImage* newImage, char* saveTo, int quality) {
   err.pub.error_exit = my_error_exit;
   // Establish the setjmp return context for my_error_exit to use.
   if (setjmp(err.setjmp_buffer)) {
-    /* If we get here, the JPEG code has signaled an error.
-     * We need to clean up the JPEG object, close the input file, and return.
-     */
     jpeg_destroy_compress(&info);
     fclose(fp);
     return 1;
@@ -169,6 +276,7 @@ int rawToJpeg(struct rawImage* newImage, char* saveTo, int quality) {
   return 0;
 }
 
+// This takes in a jpeg and uses the compression algorithm set to 0
 int jpegCompressor (char* inputJpeg, char* outputJpeg) {
   struct rawImage* rawImageData = jpegToRaw(inputJpeg);
 
@@ -185,6 +293,8 @@ int jpegCompressor (char* inputJpeg, char* outputJpeg) {
   return rawToJpegReturn;
 }
 
+// Runs an image kernal that makes any large difference between pixels more
+// noticable.
 int jpegSharpen (char* inputJpeg, char* outputJpeg) {
   struct rawImage* rawImageData = jpegToRaw(inputJpeg);
 
@@ -218,17 +328,21 @@ int jpegSharpen (char* inputJpeg, char* outputJpeg) {
         setSubPixel(newImage, j, i, 0);
         continue;
       }
-      int sharpen =   9 * getSubPixel(rawImageData, j    , i    )
-                   - 2 * getSubPixel(rawImageData, j, i    )
-                   - 2 * getSubPixel(rawImageData, j    , i)
-                   - 2 * getSubPixel(rawImageData, j, i    )
-                   - 2 * getSubPixel(rawImageData, j    , i);
+
+      // Our image kernal
+      int sharpen =  9 * getSubPixel(rawImageData, j       , i    )
+                   - 2 * getSubPixel(rawImageData, j + comp, i    )
+                   - 2 * getSubPixel(rawImageData, j       , i + 1)
+                   - 2 * getSubPixel(rawImageData, j - comp, i    )
+                   - 2 * getSubPixel(rawImageData, j       , i - 1);
+
       if (sharpen > 255) {
         sharpen = 255;
       }
       if (sharpen < 0) {
         sharpen = 0;
       }
+
       setSubPixel(newImage, j, i, sharpen);
     }
   }
@@ -245,6 +359,7 @@ int jpegSharpen (char* inputJpeg, char* outputJpeg) {
   return rawToJpegReturn;
 }
 
+// This really highlights borders
 int jpegBorder (char* inputJpeg, char* outputJpeg) {
   struct rawImage* rawImageData = jpegToRaw(inputJpeg);
 
@@ -279,11 +394,12 @@ int jpegBorder (char* inputJpeg, char* outputJpeg) {
         continue;
       }
 
-      int border = 16  * getSubPixel(rawImageData, j    , i    )
+      // Our image kernal
+      int border = 16  * getSubPixel(rawImageData, j       , i    )
                    - 4 * getSubPixel(rawImageData, j + comp, i    )
-                   - 4 * getSubPixel(rawImageData, j    , i + 1)
+                   - 4 * getSubPixel(rawImageData, j       , i + 1)
                    - 4 * getSubPixel(rawImageData, j - comp, i    )
-                   - 4 * getSubPixel(rawImageData, j    , i - 1);
+                   - 4 * getSubPixel(rawImageData, j       , i - 1);
 
       if (border > 255) {
         border = 255;
@@ -308,6 +424,8 @@ int jpegBorder (char* inputJpeg, char* outputJpeg) {
   return rawToJpegReturn;
 }
 
+// Creates a text file such that the pixel's brightness corresponds to ascii 
+// characters.
 int jpegToText(char* inputJpeg, char* outputText) {
   struct rawImage* rawImageData = jpegToRaw(inputJpeg);
 
@@ -363,6 +481,10 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  if (check_if_png(argv[2])) {
+    pngToJpeg(argv[2]);
+  }
+
   if (strcmp(argv[1], "compress") == 0) {
     return jpegCompressor(argv[2], "outputJpeg.jpg");
   }
@@ -378,8 +500,6 @@ int main(int argc, char *argv[]) {
   if (strcmp(argv[1], "sharpen") == 0) {
     return jpegSharpen(argv[2], "outputJpeg.jpg");
   }
-
-  printf("finished!");
 
   return 1;
 }

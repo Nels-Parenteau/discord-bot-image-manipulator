@@ -34,6 +34,17 @@ client.on('messageCreate', async message => {
     })
   }
 
+  async function textToString(text) {
+    const fs = require('fs/promises');
+
+    try {
+      const data = await fs.readFile(text, { encoding: 'utf8' });
+      return data;
+    } catch (err) {
+      console.log(err);
+    }
+  }
+
   if(message.content.startsWith("%")){
     command = message.content.slice(1, message.content.length);
     const fs = require('fs');
@@ -170,8 +181,10 @@ client.on('messageCreate', async message => {
       }) 
 
       try {
-        await jpegFilter("sharpen", "input.photo");
-        await message.reply({files: ["./outputJpeg.jpg"]});
+        await jpegFilter("text", "input.photo");
+        data = await textToString("jpegToText.txt");
+        data = "```" + data + "```";
+        await message.reply(data);
       }
       catch (e) {
         console.log(e);

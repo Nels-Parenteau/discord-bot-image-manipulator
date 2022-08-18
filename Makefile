@@ -6,7 +6,7 @@ init:
 	echo -e '{\n  "token": "YOUR TOKEN HERE"\n}' >> config.json
 
 filter:
-	gcc -g -o jpegFilter jpegFilter.c -ljpeg
+	gcc -g -o jpegFilter jpegFilter.c -ljpeg -lpng
 
 run:
 	node index.js
