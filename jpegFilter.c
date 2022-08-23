@@ -439,11 +439,21 @@ int jpegToText(char* inputJpeg, char* outputText) {
 
   int jumpBy = rawImageData->width / 40;
 
-  for (int i = 0; i < rawImageData->height; i += 2 * jumpBy) {
+  if (jumpBy == 0) {
+    fprintf(file, "Image too small");
+    free(rawImageData->data);
+    free(rawImageData);
+    return 0;
+  }
+
+  // If i > 49 then the size of the file will exceed 2000 characters which is 
+  // more than Discord can handle.
+  for (int i = 0; i < rawImageData->height && i < 49 * jumpBy;
+                  i += 2 * jumpBy) {
     for (int j = 0; j < rawImageData->width; j += jumpBy) {
       int avgData = (getSubPixel(rawImageData, j * 3, i)
-                  + getSubPixel(rawImageData, j * 3, i)
-                  + getSubPixel(rawImageData, j * 3, i)) / 3;
+                  +  getSubPixel(rawImageData, j * 3, i)
+                  +  getSubPixel(rawImageData, j * 3, i)) / 3;
       
       char out =
       (0x0F >= avgData)                   * ' ' +
