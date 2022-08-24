@@ -6,8 +6,8 @@ manipulation in question are image kernels for mainly comedic effect.
 This bot would not have been possible without the help of Khan Winter
 (https://github.com/thecoolwinter).
 
-WARNING: This program only works with libpng 1.6, some packages only use 1.5 
-which will not work properly.
+WARNING: This program only works with libpng 1.6, some packages managers
+only use 1.5 which will not work properly.
 
 INSTALLATION: You need to have gcc, Node.js, and npm.
 
