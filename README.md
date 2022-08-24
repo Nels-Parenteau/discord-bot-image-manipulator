@@ -3,6 +3,8 @@
 This Discord Bot, using discord.js, is able to take user images and do various
 manipulations. Uses libjpeg and libpng C libraries for manipulation. The 
 manipulation in question are image kernels for mainly comedic effect.
+This bot would not have been possible without the help of Khan Winter
+(https://github.com/thecoolwinter).
 
 WARNING: This program only works with libpng 1.6, some packages only use 1.5 
 which will not work properly.
